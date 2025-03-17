@@ -46,14 +46,15 @@ def _create_table_and_index(table_name: str) -> List[sql.Composed]:
     return statements
 
 
-def _get_messages_query(table_name: str) -> sql.Composed:
+def _get_messages_query(table_name: str, limit_messages: int = 100) -> sql.Composed:
     """Make a SQL query to get messages for a given session."""
     return sql.SQL(
         "SELECT message "
         "FROM {table_name} "
         "WHERE session_id = %(session_id)s "
-        "ORDER BY id;"
-    ).format(table_name=sql.Identifier(table_name))
+        "ORDER BY id "
+        "LIMIT {limit_messages};" 
+    ).format(table_name=sql.Identifier(table_name), limit_messages=sql.Literal(limit_messages))
 
 
 def _delete_by_session_id_query(table_name: str) -> sql.Composed:
@@ -86,6 +87,7 @@ class PostgresChatMessageHistory(BaseChatMessageHistory):
         sync_connection: Optional[psycopg.Connection] = None,
         async_connection: Optional[psycopg.AsyncConnection] = None,
         conn_pool: Optional[AsyncConnectionPool] = None,
+        limit_messages: int = 100
     ) -> None:
         """Client for persisting chat message history in a Postgres database,
 
@@ -194,6 +196,7 @@ class PostgresChatMessageHistory(BaseChatMessageHistory):
         self._connection = sync_connection
         self._aconnection = async_connection
         self._conn_pool = conn_pool
+        self._limit_messages = limit_messages
 
         # Validate that session id is a UUID
         try:
@@ -204,6 +207,8 @@ class PostgresChatMessageHistory(BaseChatMessageHistory):
             )
 
         self._session_id = session_id
+        self._get_messages_query = _get_messages_query
+        self._insert_message_query = _insert_message_query
 
         if not re.match(r"^\w+$", table_name):
             raise ValueError(
@@ -346,7 +351,8 @@ class PostgresChatMessageHistory(BaseChatMessageHistory):
         """Retrieve messages from the chat message history asynchronously."""
         if self._conn_pool is not None:
             async with self._conn_pool.connection() as async_connection:
-                query = self._get_messages_query(self._table_name)
+                print(f"_conn_pool: {self._session_id}")
+                query = self._get_messages_query(self._table_name, self._limit_messages)
                 async with async_connection.cursor() as cursor:
                     await cursor.execute(query, {"session_id": self._session_id})
                     items = [record[0] for record in await cursor.fetchall()]
