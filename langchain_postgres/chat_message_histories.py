@@ -50,10 +50,14 @@ def _get_messages_query(table_name: str, limit_messages: int = 100) -> sql.Compo
     """Make a SQL query to get messages for a given session."""
     return sql.SQL(
         "SELECT message "
-        "FROM {table_name} "
-        "WHERE session_id = %(session_id)s "
-        "ORDER BY id "
-        "LIMIT {limit_messages};" 
+        "FROM ( "
+            "SELECT message, id "
+            "FROM {table_name} "
+            "WHERE session_id = %(session_id)s "
+            "ORDER BY id DESC "
+            "LIMIT {limit_messages} "
+        ") AS subquery_chat_history "
+        "ORDER BY id ASC;"
     ).format(table_name=sql.Identifier(table_name), limit_messages=sql.Literal(limit_messages))
 
 
@@ -310,6 +314,7 @@ class PostgresChatMessageHistory(BaseChatMessageHistory):
                 for message in messages
             ]
             async with self._conn_pool.connection() as async_connection:
+                
                 query = self._insert_message_query(self._table_name)
                 async with async_connection.cursor() as cursor:
                     await cursor.executemany(query, values)
@@ -351,7 +356,6 @@ class PostgresChatMessageHistory(BaseChatMessageHistory):
         """Retrieve messages from the chat message history asynchronously."""
         if self._conn_pool is not None:
             async with self._conn_pool.connection() as async_connection:
-                print(f"_conn_pool: {self._session_id}")
                 query = self._get_messages_query(self._table_name, self._limit_messages)
                 async with async_connection.cursor() as cursor:
                     await cursor.execute(query, {"session_id": self._session_id})
